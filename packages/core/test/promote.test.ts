@@ -196,7 +196,9 @@ describe('promote', () => {
       'Entry "linkPath" (production) was changed by someone else: expected version 1.',
     );
     await expect(promote({ sourceVersion: 3 })).rejects.toBeInstanceOf(VersionConflictError);
-    await promote({});
+    // 0: the target must not exist yet.
+    await promote({ expectedVersion: 0 });
+    await expect(promote({ expectedVersion: 0 })).rejects.toThrow('but it is at version 1');
     await expect(promote({ expectedVersion: 2 })).rejects.toThrow('but it is at version 1');
   });
 

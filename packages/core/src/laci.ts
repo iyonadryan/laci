@@ -217,7 +217,10 @@ export interface PromoteOptions {
   channel?: MessageChannel;
   /** Promote every locale and channel of the key at once, all or nothing. */
   all?: boolean;
-  /** The version of the target the change is based on (not with `all`). */
+  /**
+   * The version of the target the change is based on, `0` when it did not exist (not with
+   * `all`).
+   */
   expectedVersion?: number;
   /** The version of the source that was reviewed (not with `all`). */
   sourceVersion?: number;
@@ -257,6 +260,8 @@ export interface Laci {
   readonly timeZone: string;
   /** Whether the `syncProviderStatus` option was given. */
   readonly canSyncProviderStatus: boolean;
+  /** Size and nesting limits of stored values, with the defaults filled in. */
+  readonly limits: Required<ValueLimits>;
 
   /**
    * Creates an entry when it does not exist yet, and returns the stored entry. An existing
@@ -574,9 +579,10 @@ export function createLaci(options: LaciOptions): Laci {
       promoteOptions.note ?? `Promoted from ${source.environment} (version ${source.version})`;
     const previous = await store.getEntry(address);
     if (previous && previous.kind !== source.kind) throw new EntryExistsError(address);
+    // `expectedVersion: 0`: the target must not exist yet.
     if (
       promoteOptions.expectedVersion !== undefined &&
-      promoteOptions.expectedVersion !== previous?.version
+      promoteOptions.expectedVersion !== (previous?.version ?? 0)
     ) {
       throw new VersionConflictError(address, promoteOptions.expectedVersion, previous?.version);
     }
@@ -684,6 +690,7 @@ export function createLaci(options: LaciOptions): Laci {
     defaultLocale,
     timeZone,
     canSyncProviderStatus: options.syncProviderStatus !== undefined,
+    limits,
 
     async define(key, input) {
       const { kind, address } = resolve(key, input);

@@ -91,6 +91,6 @@ export { parseInstant } from './date';
 export { COLOR_PATTERN, checkSchema, validateAgainstSchema } from './validation/schema';
 export { DEFAULT_LIMITS, checkValue } from './validation/limits';
 export type { ValueLimits } from './validation/limits';
-export { KEY_PATTERN, LOCALE_PATTERN, checkAddress } from './validation/entry';
+export { KEY_PATTERN, LOCALE_PATTERN, checkAddress, validateContent } from './validation/entry';
 export { createUuidV7Generator, uuidv7 } from './uuid';
 export type { IdGenerator, UuidV7GeneratorOptions } from './uuid';

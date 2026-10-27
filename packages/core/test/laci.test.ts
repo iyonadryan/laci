@@ -50,6 +50,7 @@ describe('createLaci', () => {
     expect(laci.environment).toBe('production');
     expect(laci.environments).toEqual(['production', 'staging', 'development']);
     expect(laci.defaultLocale).toBe('en-US');
+    expect(laci.limits).toEqual({ maxValueBytes: 1_000_000, maxDepth: 10 });
   });
 
   it('rejects an environment outside `environments`', () => {

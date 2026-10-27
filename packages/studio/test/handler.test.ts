@@ -134,6 +134,7 @@ describe('API', () => {
       timeZone: 'UTC',
       sendTest: false,
       providerSync: false,
+      limits: { maxValueBytes: 1_000_000, maxDepth: 10 },
     });
     vi.stubEnv('NODE_ENV', undefined);
     const plain = await setupHandler();

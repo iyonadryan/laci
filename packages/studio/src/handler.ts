@@ -18,6 +18,7 @@ import {
   TemplateRenderError,
   UnexpectedValueError,
   UnknownEnvironmentError,
+  validateContent,
   VersionConflictError,
 } from '@lacijs/core';
 import type {
@@ -37,6 +38,8 @@ import type {
   PromoteChange,
   RenderedEmail,
   RenderedMessage,
+  ValidationIssue,
+  ValidationTarget,
 } from '@lacijs/core';
 import { CSRF_HEADER } from './shared';
 import type { StudioUser } from './shared';
@@ -97,6 +100,18 @@ export type StudioEntry = Entry & {
   warnings: MessageWarning[];
 };
 
+/** What `POST api/validate` returns. */
+export interface StudioValidation {
+  valid: boolean;
+  /** What is invalid: the schema or the value; `null` when both are valid. */
+  target: ValidationTarget | null;
+  issues: readonly ValidationIssue[];
+  /** Message templates: see `messageWarnings` of `@lacijs/core`. */
+  warnings: MessageWarning[];
+  /** Size of the value as stored (UTF-8 JSON). */
+  bytes: number;
+}
+
 /** What `POST api/entries/:key/promote` returns. */
 export interface StudioPromoteResult {
   changes: (PromoteChange & { entry: StudioEntry })[];
@@ -133,7 +148,8 @@ const SECURITY_HEADERS = {
   'x-frame-options': 'DENY',
   'referrer-policy': 'no-referrer',
   'content-security-policy':
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+    // Remote images: email previews show the template's images.
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'none'",
 };
 
 /** Whether the studio runs: `enabled`, or on unless `NODE_ENV` is `production`. */
@@ -312,6 +328,7 @@ function changesOf(body: Record<string, unknown>): EntryChanges {
  *   `dryRun` to only plan it)
  * - `POST api/entries/:key/sync-provider-status`: ask `syncProviderStatus` for the status of
  *   a WhatsApp template and store it
+ * - `POST api/validate`: check a `value` and `schema` of `kind` (and `channel`) without saving
  * - `POST api/preview/email`: render a stored (`key`) or unsaved (`value`, `schema`) email with
  *   `data`; drafts too
  * - `POST api/preview/message`: the same for a message template of `channel`
@@ -387,7 +404,11 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
         timeZone: laci.timeZone,
         sendTest: options.sendTest !== undefined,
         providerSync: laci.canSyncProviderStatus,
+        limits: laci.limits,
       });
+    }
+    if (method === 'POST' && segments.length === 1 && resource === 'validate') {
+      return json(200, validate(await readJson(request)));
     }
     if (method === 'POST' && segments.length === 2 && resource === 'preview' && key === 'email') {
       return json(200, await renderEmail(await readJson(request)));
@@ -588,11 +609,12 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
       throw new HttpError(400, '"from" and "to" are required.');
     }
     if (from === to) throw new HttpError(400, '"from" and "to" must be different environments.');
-    const version = (name: string) =>
+    // `expectedVersion: 0`: the target must not exist yet.
+    const version = (name: string, min: number) =>
       body[name] === undefined || body[name] === null
         ? {}
-        : { [name]: integer(name, body[name], { min: 1 }) };
-    const versions = { ...version('expectedVersion'), ...version('sourceVersion') };
+        : { [name]: integer(name, body[name], { min }) };
+    const versions = { ...version('expectedVersion', 0), ...version('sourceVersion', 1) };
     const all = body.all === true;
     if (all && Object.keys(versions).length > 0) {
       throw new HttpError(400, '"expectedVersion" and "sourceVersion" cannot be used with "all".');
@@ -616,6 +638,23 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
       changes.push({ ...change, entry: await withWarnings(change.entry, change.previous) });
     }
     return { changes };
+  }
+
+  function validate(body: Record<string, unknown>): StudioValidation {
+    const kind = oneOf<EntryKind>('kind', body.kind, ENTRY_KINDS) ?? 'CONFIG';
+    const channel = kind === 'MESSAGE_TEMPLATE' ? channelOf(body) : null;
+    if (!isObject(body.schema)) throw new HttpError(400, '"schema" must be a JSON Schema object.');
+    if (!('value' in body)) throw new HttpError(400, '"value" is required.');
+    const bytes = new TextEncoder().encode(JSON.stringify(body.value)).length;
+    try {
+      validateContent('the value', { kind, channel }, body.schema, body.value, laci.limits);
+    } catch (error) {
+      // validateContent throws nothing else.
+      const { target, issues } = error as LaciValidationError;
+      return { valid: false, target, issues, warnings: [], bytes };
+    }
+    const warnings = channel === null ? [] : messageWarnings(channel, body.value, body.previous);
+    return { valid: true, target: null, issues: [], warnings, bytes };
   }
 
   async function syncProviderStatus(

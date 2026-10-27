@@ -5,10 +5,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "vitest/globals", "vite/client"],
     "paths": {
-      "@lacijs/core": ["../core/src/index.ts"]
-    }
+      "@lacijs/core": ["../core/src/index.ts"],
+      "@lacijs/editor": ["../editor/src/index.ts"]
+    },
+    "jsx": "react-jsx"
   },
-  "include": ["src", "test", "*.ts"]
+  "include": ["src", "ui", "test", "*.ts"]
 }

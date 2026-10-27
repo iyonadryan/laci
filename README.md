@@ -44,8 +44,8 @@ them through a small, typed API.
 | `@lacijs/core`     | Store API, validation, in-memory store, email and message templates |
 | `@lacijs/postgres` | PostgreSQL storage adapter                                          |
 | `@lacijs/mysql`    | MySQL storage adapter                                               |
-| `@lacijs/editor`   | React editor components (planned)                                   |
-| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned)     |
+| `@lacijs/editor`   | React editor: forms from JSON Schema, templates, review, history    |
+| `@lacijs/studio`   | The editor as a ready-made web app, standalone or in your server    |
 
 ## Quick look (planned API)
 
@@ -86,6 +86,17 @@ if (process.env.NODE_ENV !== 'production') {
   await startStudio({ laci, label: 'development' });
 }
 ```
+
+Or mount the studio's API in your admin server (`@lacijs/studio/express`, `/fastify`, `/hono`) and render the editor in your own React app:
+
+```tsx
+import { LaciEditor } from '@lacijs/editor';
+import '@lacijs/editor/style.css';
+
+<LaciEditor apiUrl="/admin/laci/api/" headers={{ authorization: `Bearer ${token}` }} />;
+```
+
+The editor's colors are CSS variables (`--laci-primary` and friends on `.laci-editor`), and every text comes from one `messages` object that you can replace to translate it.
 
 ## Environments and locales
 
@@ -142,7 +153,7 @@ SMS templates come with `countSmsSegments(text)`. GSM-7 text fits 160 characters
 - [x] Email templates
 - [x] Message templates (WhatsApp, SMS, push, in-app)
 - [x] Environments and promote, locales and fallback
-- [ ] Visual editor and Laci Studio
+- [x] Visual editor and Laci Studio
 - [ ] Docs and first release (`0.1.0`)
 
 ## Related

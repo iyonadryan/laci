@@ -6,6 +6,7 @@ export type {
   SendTestMessageTemplate,
   StudioEntry,
   StudioPromoteResult,
+  StudioValidation,
   StudioHandler,
   StudioOptions,
   StudioRequestContext,
