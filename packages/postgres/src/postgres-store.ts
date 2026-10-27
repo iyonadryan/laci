@@ -196,7 +196,7 @@ export class PostgresStore implements LaciStore {
         values,
       ),
     ]);
-    return { items: rows.rows.map(toEntry), total: count.rows[0]?.total ?? 0 };
+    return { items: rows.rows.map(toEntry), total: (count.rows as [{ total: number }])[0].total };
   }
 
   async write(changes: readonly EntryWrite[]): Promise<void> {
@@ -294,7 +294,7 @@ export class PostgresStore implements LaciStore {
         [entryId],
       ),
     ]);
-    return { items: rows.rows.map(toHistory), total: count.rows[0]?.total ?? 0 };
+    return { items: rows.rows.map(toHistory), total: (count.rows as [{ total: number }])[0].total };
   }
 
   async getHistory(entryId: string, version: number): Promise<EntryHistory | null> {

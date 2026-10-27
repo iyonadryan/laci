@@ -226,3 +226,21 @@ describe('checkAddress', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('validator cache', () => {
+  it('names formats without a custom message', () => {
+    expect(validateAgainstSchema({ type: 'string', format: 'ipv4' }, 'x')[0]?.message).toBe(
+      'must match format "ipv4"',
+    );
+  });
+
+  it('keeps working after more than 500 schemas were compiled', () => {
+    const first = { type: 'integer', minimum: -1 };
+    expect(validateAgainstSchema(first, -2)).toHaveLength(1);
+    for (let i = 0; i < 520; i++) {
+      expect(validateAgainstSchema({ type: 'integer', minimum: i }, i)).toEqual([]);
+    }
+    expect(validateAgainstSchema(first, -2)).toHaveLength(1);
+    expect(checkSchema({ $id: 'reused', type: 'string' })).toEqual([]);
+  });
+});

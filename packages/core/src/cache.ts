@@ -65,8 +65,4 @@ export class TtlCache<T> {
       this.slots.delete(key);
     }
   }
-
-  get size(): number {
-    return this.slots.size;
-  }
 }

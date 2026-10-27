@@ -706,3 +706,29 @@ describe('onChange', () => {
     consoleError.mockRestore();
   });
 });
+
+describe('error paths', () => {
+  it('refuses an invalid status in update', async () => {
+    const { laci } = setup();
+    await laci.define('n', { schema: {}, value: 1 });
+    await expect(laci.update('n', { status: 'LIVE' as never })).rejects.toMatchObject({
+      target: 'entry',
+      issues: [expect.objectContaining({ path: 'status' })],
+    });
+    expect((await laci.getEntry('n'))?.version).toBe(1);
+  });
+
+  it('passes store errors through from define', async () => {
+    const { laci, store } = setup();
+    vi.spyOn(store, 'write').mockRejectedValueOnce(new Error('disk full'));
+    await expect(laci.define('n', { schema: {}, value: 1 })).rejects.toThrow('disk full');
+  });
+
+  it('rethrows a duplicate that cannot be read back as the same kind', async () => {
+    const { laci, store } = setup();
+    vi.spyOn(store, 'write').mockRejectedValueOnce(
+      new EntryExistsError({ key: 'n', environment: 'production', locale: null, channel: null }),
+    );
+    await expect(laci.define('n', { schema: {}, value: 1 })).rejects.toThrow(EntryExistsError);
+  });
+});

@@ -29,11 +29,12 @@ function validateUniqueBy(
   _parentSchema?: unknown,
   context?: DataValidationCxt,
 ): boolean {
-  if (!Array.isArray(data)) return true;
+  // The keyword has type "array", so Ajv only calls it for lists.
+  const items = data as unknown[];
   const fields = fieldsOf(schema);
   const seen = new Map<string, number>();
   const errors: Partial<ErrorObject>[] = [];
-  data.forEach((item: unknown, index) => {
+  items.forEach((item, index) => {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) return;
     const values = fields.map((field) => (item as Record<string, unknown>)[field]);
     if (values.every((value) => value === undefined)) return;
@@ -48,7 +49,7 @@ function validateUniqueBy(
       fields.length === 1 ? `"${field}"` : fields.map((name) => `"${name}"`).join(' + ');
     errors.push({
       keyword: 'uniqueBy',
-      instancePath: `${context?.instancePath ?? ''}/${index}/${field.replace(/~/g, '~0').replace(/\//g, '~1')}`,
+      instancePath: `${(context as DataValidationCxt).instancePath}/${index}/${field.replace(/~/g, '~0').replace(/\//g, '~1')}`,
       params: { fields, duplicateOf: first },
       message: `must be unique: item ${first} has the same ${label}`,
     });
@@ -121,7 +122,7 @@ function toIssue(error: ErrorObject, data: unknown): ValidationIssue {
     default:
       return {
         path: formatPath(segments),
-        message: error.message ?? 'is invalid',
+        message: String(error.message),
         keyword: error.keyword,
       };
   }
@@ -150,7 +151,7 @@ export function checkSchema(schema: unknown): ValidationIssue[] {
   }
   const ajv = instance();
   if (!ajv.validateSchema(schema)) {
-    return (ajv.errors ?? []).map((error) => toIssue(error, schema));
+    return (ajv.errors as ErrorObject[]).map((error) => toIssue(error, schema));
   }
   try {
     compile(schema as JsonSchema);
@@ -158,7 +159,7 @@ export function checkSchema(schema: unknown): ValidationIssue[] {
     return [
       {
         path: '',
-        message: error instanceof Error ? error.message : String(error),
+        message: (error as Error).message,
         keyword: 'schema',
       },
     ];
@@ -170,5 +171,5 @@ export function checkSchema(schema: unknown): ValidationIssue[] {
 export function validateAgainstSchema(schema: JsonSchema, value: unknown): ValidationIssue[] {
   const validate = compile(schema);
   if (validate(value)) return [];
-  return (validate.errors ?? []).map((error) => toIssue(error, value));
+  return (validate.errors as ErrorObject[]).map((error) => toIssue(error, value));
 }

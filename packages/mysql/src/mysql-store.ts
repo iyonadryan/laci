@@ -237,7 +237,10 @@ export class MySqlStore implements LaciStore {
         values,
       ),
     ]);
-    return { items: rows.map(toEntry), total: Number(count[0]?.total ?? 0) };
+    return {
+      items: rows.map(toEntry),
+      total: Number((count as [{ total: number | string }])[0].total),
+    };
   }
 
   async write(changes: readonly EntryWrite[]): Promise<void> {
@@ -343,7 +346,10 @@ export class MySqlStore implements LaciStore {
         [id],
       ),
     ]);
-    return { items: rows.map(toHistory), total: Number(count[0]?.total ?? 0) };
+    return {
+      items: rows.map(toHistory),
+      total: Number((count as [{ total: number | string }])[0].total),
+    };
   }
 
   async getHistory(entryId: string, version: number): Promise<EntryHistory | null> {

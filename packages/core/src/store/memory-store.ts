@@ -19,15 +19,14 @@ function paginate<T>(items: T[], page: PageQuery = {}): Paginated<T> {
   return { items: items.slice(offset, offset + limit), total: items.length };
 }
 
+/** Sort key: "\u0000" sorts before every character, so this orders field by field. */
+function sortKey(entry: Entry): string {
+  return [entry.key, entry.environment, entry.locale ?? '', entry.channel ?? ''].join('\u0000');
+}
+
+/** Addresses are unique, so two entries never compare equal. */
 function compareEntries(a: Entry, b: Entry): number {
-  const left = [a.key, a.environment, a.locale ?? '', a.channel ?? ''];
-  const right = [b.key, b.environment, b.locale ?? '', b.channel ?? ''];
-  for (let i = 0; i < left.length; i++) {
-    const l = left[i] as string;
-    const r = right[i] as string;
-    if (l !== r) return l < r ? -1 : 1;
-  }
-  return 0;
+  return sortKey(a) < sortKey(b) ? -1 : 1;
 }
 
 function matches(entry: Entry, query: EntryQuery): boolean {
