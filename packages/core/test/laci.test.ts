@@ -11,7 +11,13 @@ import {
   VersionConflictError,
 } from '../src';
 import type { ChangeEvent, Laci, LaciOptions } from '../src';
-import { customerCategoryColor, customerLiveStream, linkPath, setFeatureLive } from './fixtures';
+import {
+  approvalRequest,
+  customerCategoryColor,
+  customerLiveStream,
+  linkPath,
+  setFeatureLive,
+} from './fixtures';
 
 /** A clock that only moves when told to. */
 function clock(start = '2026-10-27T00:00:00Z') {
@@ -187,22 +193,18 @@ describe('define', () => {
 
   it('stores templates with the default locale and their channel', async () => {
     const { laci } = setup({ defaultLocale: 'id-ID' });
-    const email = await laci.define('approval-request', {
-      kind: 'EMAIL_TEMPLATE',
-      schema: {},
-      value: { subject: 'Hi' },
-    });
+    const email = await laci.define('approval-request', approvalRequest);
     expect(email).toMatchObject({ kind: 'EMAIL_TEMPLATE', locale: 'id-ID', channel: null });
     const message = await laci.define('reminder', {
       kind: 'MESSAGE_TEMPLATE',
       channel: 'SMS',
       locale: 'en-US',
-      schema: {},
+      schema: { type: 'object' },
       value: { body: 'Hi' },
     });
     expect(message).toMatchObject({ locale: 'en-US', channel: 'SMS' });
     await expect(
-      laci.define('reminder', { kind: 'MESSAGE_TEMPLATE', schema: {}, value: {} }),
+      laci.define('reminder', { kind: 'MESSAGE_TEMPLATE', schema: { type: 'object' }, value: {} }),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ path: 'channel' })],
     });
@@ -290,12 +292,7 @@ describe('get', () => {
   });
 
   it('does not read templates as configs', async () => {
-    await laci.define('approval-request', {
-      kind: 'EMAIL_TEMPLATE',
-      locale: 'en',
-      schema: {},
-      value: {},
-    });
+    await laci.define('approval-request', { ...approvalRequest, locale: 'en' });
     expect(await laci.getEntry('approval-request')).toBeNull();
     await expect(laci.get('approval-request')).rejects.toThrow(EntryNotFoundError);
   });
@@ -541,12 +538,7 @@ describe('listEntries', () => {
     const { laci } = setup();
     await seed(laci);
     await laci.define('linkPath', { ...linkPath, environment: 'staging' });
-    await laci.define('approval-request', {
-      kind: 'EMAIL_TEMPLATE',
-      schema: {},
-      value: {},
-      description: 'Ask a manager',
-    });
+    await laci.define('approval-request', { ...approvalRequest, description: 'Ask a manager' });
     expect((await laci.listEntries({ kind: 'CONFIG', environment: 'production' })).total).toBe(4);
     expect((await laci.listEntries({ search: 'LINK' })).items.map((e) => e.environment)).toEqual([
       'production',

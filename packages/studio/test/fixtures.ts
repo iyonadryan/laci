@@ -30,6 +30,21 @@ export const colors = {
   ],
 };
 
+/** An email template with one required variable. */
+export const approvalRequest = {
+  kind: 'EMAIL_TEMPLATE' as const,
+  schema: {
+    type: 'object',
+    required: ['name'],
+    properties: { name: { type: 'string' }, amount: { type: 'number' } },
+  },
+  value: {
+    subject: 'Halo {{ name }}',
+    html: '<p>Halo {{ name }}, total {{ amount | formatNumber }}</p>',
+    text: 'Halo {{ name }}',
+  },
+};
+
 /** A Laci instance on a MemoryStore with a config in production and staging, and a template. */
 export async function createTestLaci(): Promise<Laci> {
   const laci = createLaci({ store: new MemoryStore(), cache: false, defaultLocale: 'id-ID' });
@@ -40,11 +55,7 @@ export async function createTestLaci(): Promise<Laci> {
     value: { home: '/' },
     status: 'DRAFT',
   });
-  await laci.define('approval-request', {
-    kind: 'EMAIL_TEMPLATE',
-    schema: { type: 'object' },
-    value: { subject: 'Halo' },
-  });
+  await laci.define('approval-request', approvalRequest);
   return laci;
 }
 

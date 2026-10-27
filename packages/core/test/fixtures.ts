@@ -105,3 +105,40 @@ export const customerCategoryColor = {
     { category: 'NEW', label: 'Customer Baru', background: '#E5F3EA', text: '#1D6B3A' },
   ] satisfies JsonValue,
 };
+
+/** An email asking a manager to approve a request. */
+export const approvalRequest = {
+  kind: 'EMAIL_TEMPLATE' as const,
+  schema: {
+    type: 'object',
+    required: ['managerName', 'requester', 'amount', 'dueDate', 'link'],
+    properties: {
+      managerName: { type: 'string', minLength: 1 },
+      requester: {
+        type: 'object',
+        required: ['name'],
+        properties: { name: { type: 'string' }, department: { type: 'string' } },
+      },
+      amount: { type: 'number' },
+      dueDate: { type: 'string', format: 'date' },
+      link: { type: 'string', format: 'uri' },
+      items: { type: 'array', items: { type: 'string' } },
+      note: { type: 'string' },
+    },
+  } satisfies JsonSchema,
+  value: {
+    fromName: 'Finance {{ requester.department }}',
+    subject:
+      'Approval needed: {{ requester.name }} ({{ amount | formatNumber: "currency", "IDR" }})',
+    html:
+      '<p>Hi {{ managerName }},</p>\n' +
+      '<p>{{ requester.name }} asks for {{ amount | formatNumber: "currency", "IDR" }} by {{ dueDate | formatDate: "long" }}.</p>\n' +
+      '{% if items %}<ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}\n' +
+      '{% if note %}<blockquote>{{ note }}</blockquote>{% endif %}\n' +
+      '<a href="{{ link }}">Review</a>',
+    text:
+      'Hi {{ managerName }},\n' +
+      '{{ requester.name }} asks for {{ amount | formatNumber: "currency", "IDR" }} by {{ dueDate | formatDate: "long" }}.\n' +
+      '{% for item in items %}- {{ item }}\n{% endfor %}Review: {{ link }}',
+  },
+};

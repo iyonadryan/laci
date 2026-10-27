@@ -33,11 +33,12 @@ export interface ValidationIssue {
 }
 
 /** What failed validation. */
-export type ValidationTarget = 'value' | 'schema' | 'entry';
+export type ValidationTarget = 'value' | 'schema' | 'entry' | 'data';
 
 /**
- * Thrown when a value does not match its schema, a schema is not a valid JSON Schema, or an
- * entry is malformed (e.g. a template without a locale).
+ * Thrown when a value does not match its schema, a schema is not a valid JSON Schema, an entry
+ * is malformed (e.g. a template without a locale), or the data passed to a template does not
+ * match its variable schema.
  */
 export class LaciValidationError extends LaciError {
   readonly target: ValidationTarget;
@@ -48,7 +49,7 @@ export class LaciValidationError extends LaciError {
     const details = issues
       .map((issue) => `  - ${issue.path === '' ? '(root)' : issue.path}: ${issue.message}`)
       .join('\n');
-    const what = target === 'value' ? 'Value' : target === 'schema' ? 'Schema' : 'Entry';
+    const what = { value: 'Value', schema: 'Schema', entry: 'Entry', data: 'Data' }[target];
     super(
       target === 'schema' ? 'INVALID_SCHEMA' : 'VALIDATION_FAILED',
       `${what} of ${subject} is invalid (${issues.length} issue${issues.length === 1 ? '' : 's'}):\n${details}`,

@@ -131,6 +131,8 @@ describe('API', () => {
       kinds: ['CONFIG', 'EMAIL_TEMPLATE', 'MESSAGE_TEMPLATE'],
       statuses: ['DRAFT', 'PUBLISHED', 'DISABLED'],
       channels: ['WHATSAPP', 'SMS', 'PUSH', 'IN_APP'],
+      timeZone: 'UTC',
+      sendTest: false,
     });
     vi.stubEnv('NODE_ENV', undefined);
     const plain = await setupHandler();
@@ -238,7 +240,7 @@ describe('API', () => {
           key: 'reminder',
           kind: 'MESSAGE_TEMPLATE',
           channel: 'SMS',
-          schema: {},
+          schema: { type: 'object' },
           value: { body: 'Hi' },
         },
         null,
@@ -319,7 +321,7 @@ describe('API', () => {
       expect(await body(await call('/api/entries/linkPath'))).toMatchObject({ status: 'DRAFT' });
       expect(
         await body(await call('/api/entries/approval-request?kind=EMAIL_TEMPLATE&locale=id-ID')),
-      ).toMatchObject({ value: { subject: 'Halo' } });
+      ).toMatchObject({ value: { subject: 'Halo {{ name }}' } });
       expect(
         await body(await call('/api/entries/customerCategoryColor?environment=staging')),
       ).toMatchObject({ environment: 'staging', createdBy: null });

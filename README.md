@@ -39,13 +39,13 @@ them through a small, typed API.
 
 ## Packages
 
-| Package            | Description                                                          |
-| ------------------ | -------------------------------------------------------------------- |
-| `@lacijs/core`     | Store API, validation, in-memory store, template rendering (planned) |
-| `@lacijs/postgres` | PostgreSQL storage adapter                                           |
-| `@lacijs/mysql`    | MySQL storage adapter                                                |
-| `@lacijs/editor`   | React editor components (planned)                                    |
-| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned)      |
+| Package            | Description                                                     |
+| ------------------ | --------------------------------------------------------------- |
+| `@lacijs/core`     | Store API, validation, in-memory store, email templates         |
+| `@lacijs/postgres` | PostgreSQL storage adapter                                      |
+| `@lacijs/mysql`    | MySQL storage adapter                                           |
+| `@lacijs/editor`   | React editor components (planned)                               |
+| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned) |
 
 ## Quick look (planned API)
 
@@ -92,7 +92,7 @@ if (process.env.NODE_ENV !== 'production') {
 - [x] Foundation: monorepo, entry schema, validator
 - [x] Core: get/set, path access, history, rollback, optimistic locking, cache
 - [x] PostgreSQL and MySQL adapters
-- [ ] Email templates
+- [x] Email templates
 - [ ] Message templates (WhatsApp, SMS, push, in-app)
 - [ ] Environments and promote, locales and fallback
 - [ ] Visual editor and Laci Studio

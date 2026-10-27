@@ -1,6 +1,8 @@
 import { TtlCache } from './cache';
 import type { InvalidateFilter } from './cache';
 import { parseInstant } from './date';
+import { renderEmailTemplate } from './email';
+import type { EmailTemplateValue, RenderedEmail } from './email';
 import {
   describeAddress,
   EntryExistsError,
@@ -51,6 +53,11 @@ export interface LaciOptions {
   environments?: readonly string[];
   /** Locale of templates when none is given, and the last locale fallback. Default `"en-US"`. */
   defaultLocale?: string;
+  /**
+   * IANA time zone of dates formatted in templates (`formatDate`), e.g. `"Asia/Jakarta"`. Default
+   * `"UTC"`, so output never depends on the server's time zone.
+   */
+  timeZone?: string;
   /** In-memory read cache. `false` turns it off. Default `{ ttlMs: 30_000 }`. */
   cache?: CacheOptions | false;
   /** Size and nesting limits of stored values. */
@@ -153,6 +160,16 @@ export interface IsLiveOptions {
 /** Query of {@link Laci.listEntries}. */
 export type ListEntriesQuery = EntryQuery;
 
+/** Options of {@link Laci.renderEmail}. */
+export interface RenderOptions {
+  /** Data environment. Default: the instance's `environment`. */
+  environment?: string;
+  /** Default: the instance's `defaultLocale`. */
+  locale?: string;
+  /** Time zone of `formatDate`. Default: the instance's `timeZone`. */
+  timeZone?: string;
+}
+
 /** Options of {@link Laci.history}. */
 export interface HistoryOptions extends EntrySelector, PageQuery {}
 
@@ -162,6 +179,7 @@ export interface Laci {
   readonly environment: string;
   readonly environments: readonly string[];
   readonly defaultLocale: string;
+  readonly timeZone: string;
 
   /**
    * Creates an entry when it does not exist yet, and returns the stored entry. An existing
@@ -214,6 +232,12 @@ export interface Laci {
    * instance do this automatically; call it when another server instance reports a change.
    */
   invalidate(filter?: InvalidateFilter): void;
+
+  /**
+   * Renders the published email template `key` with `data`, which must match the template's
+   * variable schema. Only renders: sending the email is up to your app.
+   */
+  renderEmail(key: string, data?: object, options?: RenderOptions): Promise<RenderedEmail>;
 }
 
 const DEFAULT_ENVIRONMENTS = ['production', 'staging', 'development'] as const;
@@ -229,6 +253,9 @@ export function createLaci(options: LaciOptions): Laci {
   const environments = [...(options.environments ?? DEFAULT_ENVIRONMENTS)];
   const environment = options.environment ?? 'production';
   const defaultLocale = options.defaultLocale ?? 'en-US';
+  const timeZone = options.timeZone ?? 'UTC';
+  // Throws a RangeError for unknown time zones.
+  new Intl.DateTimeFormat('en-US', { timeZone });
   const limits: Required<ValueLimits> = { ...DEFAULT_LIMITS, ...options.limits };
   const generateId = options.generateId ?? uuidv7;
   const now = options.now ?? (() => new Date());
@@ -396,6 +423,7 @@ export function createLaci(options: LaciOptions): Laci {
     environment,
     environments,
     defaultLocale,
+    timeZone,
 
     async define(key, input) {
       const { kind, address } = resolve(key, input);
@@ -549,6 +577,26 @@ export function createLaci(options: LaciOptions): Laci {
 
     invalidate(filter) {
       cache?.invalidate(filter);
+    },
+
+    async renderEmail(key, data, renderOptions = {}) {
+      const { address } = resolve(key, {
+        kind: 'EMAIL_TEMPLATE',
+        ...(renderOptions.environment === undefined
+          ? {}
+          : { environment: renderOptions.environment }),
+        ...(renderOptions.locale === undefined ? {} : { locale: renderOptions.locale }),
+      });
+      const entry = await readPublished('EMAIL_TEMPLATE', address);
+      if (!entry) throw new EntryNotFoundError(address);
+      return renderEmailTemplate({
+        value: entry.value as unknown as EmailTemplateValue,
+        schema: entry.schema,
+        data,
+        locale: entry.locale as string,
+        timeZone: renderOptions.timeZone ?? timeZone,
+        name: describeAddress(address),
+      });
     },
   };
   return laci;

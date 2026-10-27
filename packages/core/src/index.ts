@@ -13,6 +13,7 @@ export type {
   Laci,
   LaciOptions,
   ListEntriesQuery,
+  RenderOptions,
   WriteOptions,
 } from './laci';
 export { ENTRY_KINDS, ENTRY_STATUSES, MESSAGE_CHANNELS } from './types';
@@ -39,6 +40,17 @@ export {
   VersionConflictError,
 } from './errors';
 export type { ValidationIssue, ValidationTarget } from './errors';
+export {
+  checkEmailTemplate,
+  checkVariableSchema,
+  declaredVariables,
+  EMAIL_VALUE_SCHEMA,
+  renderEmailTemplate,
+  TemplateRenderError,
+} from './email';
+export type { EmailTemplateValue, RenderEmailInput, RenderedEmail } from './email';
+export { analyzeTemplate, TEMPLATE_FILTERS } from './template/engine';
+export type { FormatContext, TemplateAnalysis, TemplateMode } from './template/engine';
 export { MemoryStore } from './store/memory-store';
 export type { EntryQuery, EntryWrite, LaciStore, PageQuery, Paginated } from './store/types';
 export { formatPath, getAtPath, parsePath } from './path';
