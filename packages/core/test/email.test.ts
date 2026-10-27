@@ -320,9 +320,7 @@ describe('renderEmail', () => {
     expect((await laci.renderEmail('approval-request', data)).subject).toBe('New Rina');
     await expect(
       laci.renderEmail('approval-request', data, { environment: 'staging' }),
-    ).rejects.toThrow(
-      'Entry "approval-request" (staging, id-ID) does not exist or is not published.',
-    );
+    ).rejects.toThrow('No published version of "approval-request" (staging) for locale id-ID.');
   });
 
   it('uses the time zone of the instance, the call, or the filter', async () => {

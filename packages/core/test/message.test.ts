@@ -521,7 +521,7 @@ describe('renderMessage', () => {
     await expect(
       laci.renderMessage('live-reminder', data, { channel: 'WHATSAPP' }),
     ).rejects.toThrow(
-      '"live-reminder" (production, en-US, WHATSAPP) does not exist or is not published.',
+      'No published version of "live-reminder" (production, WHATSAPP) for locale en-US.',
     );
   });
 });

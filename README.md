@@ -87,6 +87,29 @@ if (process.env.NODE_ENV !== 'production') {
 }
 ```
 
+## Environments and locales
+
+Laci keeps a separate version of each entry per **data environment**, for example `staging` and `production`. The data environment decides which value your app reads. It has nothing to do with `NODE_ENV`, which only decides whether Laci Studio may run.
+
+```ts
+await laci.get('linkPath', { environment: 'staging' });
+
+// Copy value and schema to production as a new version, recorded in its history
+await laci.promote('linkPath', { from: 'staging', to: 'production', by: userId });
+
+// Every locale and channel of a key at once, all or nothing; dryRun only plans it
+await laci.promote('customer-live-reminder', {
+  from: 'staging',
+  to: 'production',
+  all: true,
+  dryRun: true,
+});
+```
+
+A promoted entry keeps its status and description in the target environment. An entry that is new there gets the status and description of the source. `expectedVersion` (the target) and `sourceVersion` (the version you reviewed) refuse the promotion when either has changed in the meantime.
+
+Templates fall back to another locale when the requested one has no published version. Laci tries the requested locale (`en-US`), then its base language (`en`), then your `defaultLocale`. The result's `locale` tells you which one was used. When none of them has the template, Laci throws a `TemplateNotFoundError` that lists the locales it tried. Locales are matched exactly as they are stored, including case.
+
 ## WhatsApp templates and provider parameters
 
 WhatsApp providers such as the Meta Cloud API only send templates they have approved. Those templates use numbered parameters (`{{1}}`, `{{2}}`). Laci templates use variable names. Laci maps one to the other like this:
@@ -118,7 +141,7 @@ SMS templates come with `countSmsSegments(text)`. GSM-7 text fits 160 characters
 - [x] PostgreSQL and MySQL adapters
 - [x] Email templates
 - [x] Message templates (WhatsApp, SMS, push, in-app)
-- [ ] Environments and promote, locales and fallback
+- [x] Environments and promote, locales and fallback
 - [ ] Visual editor and Laci Studio
 - [ ] Docs and first release (`0.1.0`)
 

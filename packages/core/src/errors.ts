@@ -76,6 +76,25 @@ export class EntryNotFoundError extends LaciError {
   }
 }
 
+/**
+ * No published version of a template in any locale of the fallback chain: the requested locale,
+ * its base language, then the default locale.
+ */
+export class TemplateNotFoundError extends EntryNotFoundError {
+  /** The locales tried, in order. */
+  readonly locales: readonly string[];
+
+  constructor(address: Partial<EntryAddress> & { key: string }, locales: readonly string[]) {
+    super(address);
+    const list =
+      locales.length === 1
+        ? locales[0]
+        : `${locales.slice(0, -1).join(', ')} or ${locales[locales.length - 1] as string}`;
+    this.message = `No published version of ${describeAddress(address)} for locale ${list}.`;
+    this.locales = locales;
+  }
+}
+
 /** Thrown when creating an entry whose `(key, environment, locale, channel)` already exists. */
 export class EntryExistsError extends LaciError {
   readonly key: string;

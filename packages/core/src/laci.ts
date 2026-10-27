@@ -9,6 +9,7 @@ import {
   LaciError,
   EntryNotFoundError,
   LaciValidationError,
+  TemplateNotFoundError,
   UnexpectedValueError,
   UnknownEnvironmentError,
   VersionConflictError,
@@ -21,7 +22,7 @@ import type {
   WhatsAppTemplateValue,
 } from './message';
 import { getAtPath, parsePath } from './path';
-import type { EntryQuery, LaciStore, PageQuery, Paginated } from './store/types';
+import type { EntryQuery, EntryWrite, LaciStore, PageQuery, Paginated } from './store/types';
 import type {
   Entry,
   EntryAddress,
@@ -90,7 +91,7 @@ export interface LaciOptions {
 
 /** A change made through a Laci instance. */
 export interface ChangeEvent {
-  type: 'define' | 'update' | 'rollback';
+  type: 'define' | 'update' | 'rollback' | 'promote';
   /** The entry after the change. */
   entry: Entry;
   /** The version before the change; `null` for a new entry. */
@@ -177,7 +178,10 @@ export type ListEntriesQuery = EntryQuery;
 export interface RenderOptions {
   /** Data environment. Default: the instance's `environment`. */
   environment?: string;
-  /** Default: the instance's `defaultLocale`. */
+  /**
+   * The wanted locale, e.g. the user's `en-US`. Falls back to its base language (`en`), then to
+   * the instance's `defaultLocale`, which is also the default.
+   */
   locale?: string;
   /** Time zone of `formatDate`. Default: the instance's `timeZone`. */
   timeZone?: string;
@@ -197,6 +201,48 @@ export interface SyncProviderStatusOptions {
   locale?: string;
   /** Who asked for the sync, stored in the history. */
   by?: string;
+}
+
+/** Options of {@link Laci.promote}. */
+export interface PromoteOptions {
+  /** The data environment to copy from, e.g. `"staging"`. */
+  from: string;
+  /** The data environment to copy to, e.g. `"production"`. */
+  to: string;
+  /** Default `"CONFIG"`. With `all`, only entries of this kind are promoted (all kinds without it). */
+  kind?: EntryKind;
+  /** Templates only. Default: the instance's `defaultLocale`. Ignored with `all`. */
+  locale?: string;
+  /** Message templates only. Ignored with `all`. */
+  channel?: MessageChannel;
+  /** Promote every locale and channel of the key at once, all or nothing. */
+  all?: boolean;
+  /** The version of the target the change is based on (not with `all`). */
+  expectedVersion?: number;
+  /** The version of the source that was reviewed (not with `all`). */
+  sourceVersion?: number;
+  /** Plan the promotion and return it, without writing anything. */
+  dryRun?: boolean;
+  /** Who promoted, stored in the history. */
+  by?: string;
+  /** Default `"Promoted from <from> (version <n>)"`. */
+  note?: string;
+}
+
+/** What {@link Laci.promote} did (or would do, with `dryRun`) to one target entry. */
+export interface PromoteChange {
+  /** `create`: the target did not exist; `unchanged`: it already had the same value and schema. */
+  action: 'create' | 'update' | 'unchanged';
+  source: Entry;
+  /** The target before; `null` when it is created. */
+  previous: Entry | null;
+  /** The target after. */
+  entry: Entry;
+}
+
+/** What {@link Laci.promote} returns. */
+export interface PromoteResult {
+  changes: PromoteChange[];
 }
 
 /** Options of {@link Laci.history}. */
@@ -249,6 +295,14 @@ export interface Laci {
   /** Restores the value and schema of an earlier version, as a new version. */
   rollback(key: string, version: number, options?: WriteOptions): Promise<Entry>;
 
+  /**
+   * Copies the value and schema of an entry from one data environment to another, as a new
+   * version of the target (or a new entry), recorded in its history. The target keeps its status
+   * and description; a new target gets those of the source. With `all`, every locale and channel
+   * of the key is promoted in one atomic write.
+   */
+  promote(key: string, options: PromoteOptions): Promise<PromoteResult>;
+
   /** Versions of an entry, newest first. */
   history(key: string, options?: HistoryOptions): Promise<Paginated<EntryHistory>>;
 
@@ -267,6 +321,10 @@ export interface Laci {
   /**
    * Renders the published email template `key` with `data`, which must match the template's
    * variable schema. Only renders: sending the email is up to your app.
+   *
+   * Locales fall back from the requested one (`en-US`) to its base language (`en`), then to the
+   * default locale; the result's `locale` is the one used. Without any, it throws a
+   * {@link TemplateNotFoundError}.
    */
   renderEmail(key: string, data?: object, options?: RenderOptions): Promise<RenderedEmail>;
 
@@ -274,7 +332,7 @@ export interface Laci {
    * Renders the published message template `key` for `options.channel` with `data`, as plain
    * text. For WhatsApp the result has `params`: the values of the `{{ }}` of the header and
    * body, in order, for the provider's numbered parameters. Only renders: sending is up to your
-   * app.
+   * app. Locales fall back like {@link renderEmail}.
    */
   renderMessage<C extends MessageChannel>(
     key: string,
@@ -349,15 +407,39 @@ export function createLaci(options: LaciOptions): Laci {
     return entry?.kind === kind ? entry : null;
   }
 
-  /** The published template for a render, or an {@link EntryNotFoundError}. */
+  /**
+   * Locales to try for `requested`, most specific first: `zh-Hant-TW`, `zh-Hant`, `zh`, then the
+   * default locale.
+   */
+  function localeChain(requested: string | undefined): string[] {
+    const chain = new Set<string>();
+    if (requested !== undefined) {
+      const parts = requested.split('-');
+      for (let length = parts.length; length > 0; length--) {
+        chain.add(parts.slice(0, length).join('-'));
+      }
+    }
+    chain.add(defaultLocale);
+    return [...chain];
+  }
+
+  /**
+   * The published template for a render, in the first locale of the fallback chain that has
+   * one, or a {@link TemplateNotFoundError}.
+   */
   async function publishedTemplate(
     key: string,
     selector: EntrySelector & { kind: EntryKind },
   ): Promise<{ entry: Entry; address: EntryAddress }> {
+    const locales = localeChain(selector.locale);
+    // Validates the requested address; its base languages are valid then too.
     const { address } = resolve(key, selector);
-    const entry = await readPublished(selector.kind, address);
-    if (!entry) throw new EntryNotFoundError(address);
-    return { entry, address };
+    for (const locale of locales) {
+      const candidate = { ...address, locale };
+      const entry = await readPublished(selector.kind, candidate);
+      if (entry) return { entry, address: candidate };
+    }
+    throw new TemplateNotFoundError({ ...address, locale: null }, locales);
   }
 
   /** The published entry, through the cache. */
@@ -393,6 +475,149 @@ export function createLaci(options: LaciOptions): Laci {
     };
   }
 
+  /**
+   * The next version of `current` with `changes`, validated; `null` when nothing changes. Resets
+   * the provider approval of a WhatsApp template whose reviewed content changes.
+   */
+  function nextVersion(current: Entry, changes: EntryChanges, by: string | null): Entry | null {
+    const schema = changes.schema ?? current.schema;
+    let value = changes.value ?? current.value;
+    const status = changes.status ?? current.status;
+    const description =
+      changes.description === undefined ? current.description : changes.description;
+    const issues = checkAddress({ ...current, status });
+    if (issues.length > 0) throw new LaciValidationError(describeAddress(current), 'entry', issues);
+    validateContent(describeAddress(current), current, schema, value, limits);
+    if (current.kind === 'MESSAGE_TEMPLATE' && current.channel === 'WHATSAPP') {
+      value = resetProviderApproval(
+        current.value as unknown as WhatsAppTemplateValue,
+        value as unknown as WhatsAppTemplateValue,
+      );
+    }
+    if (
+      sameJson(schema, current.schema) &&
+      sameJson(value, current.value) &&
+      status === current.status &&
+      description === current.description
+    ) {
+      return null;
+    }
+    return {
+      ...current,
+      schema,
+      value,
+      status,
+      description,
+      version: current.version + 1,
+      updatedBy: by,
+      updatedAt: now(),
+    };
+  }
+
+  /** Every entry matching `query`, across pages. */
+  async function listAll(query: EntryQuery): Promise<Entry[]> {
+    const items: Entry[] = [];
+    for (;;) {
+      const page = await store.listEntries({ ...query, limit: 100, offset: items.length });
+      items.push(...page.items);
+      if (page.items.length === 0 || items.length >= page.total) return items;
+    }
+  }
+
+  /** The source entries of a promotion. */
+  async function promoteSources(key: string, promoteOptions: PromoteOptions): Promise<Entry[]> {
+    if (!promoteOptions.all) {
+      const source = await mustLoad(key, {
+        ...promoteOptions,
+        environment: promoteOptions.from,
+      });
+      if (
+        promoteOptions.sourceVersion !== undefined &&
+        promoteOptions.sourceVersion !== source.version
+      ) {
+        throw new VersionConflictError(source, promoteOptions.sourceVersion, source.version);
+      }
+      return [source];
+    }
+    if (
+      promoteOptions.expectedVersion !== undefined ||
+      promoteOptions.sourceVersion !== undefined
+    ) {
+      throw new TypeError(
+        'Laci: `expectedVersion` and `sourceVersion` cannot be used with `all`: promote one entry to check versions.',
+      );
+    }
+    const sources = await listAll({
+      key,
+      environment: promoteOptions.from,
+      ...(promoteOptions.kind ? { kind: promoteOptions.kind } : {}),
+    });
+    if (sources.length === 0) {
+      throw new EntryNotFoundError({ key, environment: promoteOptions.from });
+    }
+    return sources;
+  }
+
+  /** What promoting `source` does to its counterpart in `to`, and the write for it. */
+  async function planPromotion(
+    source: Entry,
+    promoteOptions: PromoteOptions,
+  ): Promise<{ change: PromoteChange; write: EntryWrite | null }> {
+    const address: EntryAddress = {
+      key: source.key,
+      environment: promoteOptions.to,
+      locale: source.locale,
+      channel: source.channel,
+    };
+    const by = promoteOptions.by ?? null;
+    const note =
+      promoteOptions.note ?? `Promoted from ${source.environment} (version ${source.version})`;
+    const previous = await store.getEntry(address);
+    if (previous && previous.kind !== source.kind) throw new EntryExistsError(address);
+    if (
+      promoteOptions.expectedVersion !== undefined &&
+      promoteOptions.expectedVersion !== previous?.version
+    ) {
+      throw new VersionConflictError(address, promoteOptions.expectedVersion, previous?.version);
+    }
+    if (previous) {
+      const entry = nextVersion(previous, { value: source.value, schema: source.schema }, by);
+      if (entry === null) {
+        return { change: { action: 'unchanged', source, previous, entry: previous }, write: null };
+      }
+      return {
+        change: { action: 'update', source, previous, entry },
+        write: {
+          type: 'update',
+          entry,
+          expectedVersion: previous.version,
+          history: history(entry, by, note),
+        },
+      };
+    }
+    const subject = describeAddress(address);
+    validateContent(subject, source, source.schema, source.value, limits);
+    const at = now();
+    const entry: Entry = {
+      ...address,
+      id: generateId(),
+      kind: source.kind,
+      description: source.description,
+      schema: source.schema,
+      value: source.value,
+      status: source.status,
+      version: 1,
+      createdBy: by,
+      updatedBy: by,
+      createdAt: at,
+      updatedAt: at,
+    };
+    return {
+      change: { action: 'create', source, previous: null, entry },
+      write: { type: 'insert', entry, history: history(entry, by, note) },
+    };
+  }
+
   /** Writes a new version of `current`; validates, checks the version, and drops the cache. */
   async function writeVersion(
     current: Entry,
@@ -408,41 +633,9 @@ export function createLaci(options: LaciOptions): Laci {
       cache?.invalidate(current);
       throw new VersionConflictError(current, writeOptions.expectedVersion, current.version);
     }
-    const schema = changes.schema ?? current.schema;
-    let value = changes.value ?? current.value;
-    const status = changes.status ?? current.status;
-    const description =
-      changes.description === undefined ? current.description : changes.description;
-    const issues = checkAddress({ ...current, status });
-    if (issues.length > 0) throw new LaciValidationError(describeAddress(current), 'entry', issues);
-    validateContent(describeAddress(current), current, schema, value, limits);
-    if (current.kind === 'MESSAGE_TEMPLATE' && current.channel === 'WHATSAPP') {
-      value = resetProviderApproval(
-        current.value as unknown as WhatsAppTemplateValue,
-        value as unknown as WhatsAppTemplateValue,
-      );
-    }
-
-    if (
-      sameJson(schema, current.schema) &&
-      sameJson(value, current.value) &&
-      status === current.status &&
-      description === current.description
-    ) {
-      return current;
-    }
-
     const by = writeOptions.by ?? null;
-    const entry: Entry = {
-      ...current,
-      schema,
-      value,
-      status,
-      description,
-      version: current.version + 1,
-      updatedBy: by,
-      updatedAt: now(),
-    };
+    const entry = nextVersion(current, changes, by);
+    if (entry === null) return current;
     try {
       await store.write([
         {
@@ -615,6 +808,35 @@ export function createLaci(options: LaciOptions): Laci {
 
     async update(key, changes, writeOptions = {}) {
       return writeVersion(await mustLoad(key, writeOptions), changes, writeOptions, 'update');
+    },
+
+    async promote(key, promoteOptions) {
+      checkEnvironment(promoteOptions.from);
+      checkEnvironment(promoteOptions.to);
+      if (promoteOptions.from === promoteOptions.to) {
+        throw new TypeError('Laci: `from` and `to` of promote must be different environments.');
+      }
+      const plans: { change: PromoteChange; write: EntryWrite | null }[] = [];
+      for (const source of await promoteSources(key, promoteOptions)) {
+        plans.push(await planPromotion(source, promoteOptions));
+      }
+      const changes = plans.map((plan) => plan.change);
+      const writes = plans.flatMap((plan) => (plan.write ? [plan.write] : []));
+      if (promoteOptions.dryRun || writes.length === 0) return { changes };
+      try {
+        await store.write(writes);
+      } finally {
+        for (const write of writes) cache?.invalidate(write.entry);
+      }
+      for (const change of changes) {
+        if (change.action === 'unchanged') continue;
+        await emit({
+          type: 'promote',
+          entry: change.entry,
+          previousVersion: change.previous?.version ?? null,
+        });
+      }
+      return { changes };
     },
 
     async rollback(key, version, writeOptions = {}) {

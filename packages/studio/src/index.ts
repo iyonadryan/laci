@@ -5,6 +5,7 @@ export type {
   SendTestMessage,
   SendTestMessageTemplate,
   StudioEntry,
+  StudioPromoteResult,
   StudioHandler,
   StudioOptions,
   StudioRequestContext,

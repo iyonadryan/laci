@@ -34,6 +34,7 @@ import type {
   MessageChannel,
   MessageTemplateValue,
   MessageWarning,
+  PromoteChange,
   RenderedEmail,
   RenderedMessage,
 } from '@lacijs/core';
@@ -88,9 +89,18 @@ export type SendTestMessage = SendTestEmail | SendTestMessageTemplate;
 
 /** An entry as the studio API returns it. */
 export type StudioEntry = Entry & {
-  /** Message templates: see `messageWarnings` of `@lacijs/core`. Empty for other kinds. */
+  /**
+   * Message templates: see `messageWarnings` of `@lacijs/core`. Templates also warn with code
+   * `schemaMismatch` when another locale of the template has a different variable schema.
+   * Empty for configs.
+   */
   warnings: MessageWarning[];
 };
+
+/** What `POST api/entries/:key/promote` returns. */
+export interface StudioPromoteResult {
+  changes: (PromoteChange & { entry: StudioEntry })[];
+}
 
 /** Sends a test message; throw to report a failure to the studio user. */
 export type SendTest = (message: SendTestMessage) => void | Promise<void>;
@@ -232,6 +242,8 @@ function listQuery(params: URLSearchParams): EntryQuery {
       .filter((part) => part !== '')
       .map((part) => oneOf<EntryStatus>('status', part, ENTRY_STATUSES) as EntryStatus);
   }
+  const key = get('key');
+  if (key) query.key = key;
   const search = get('search');
   if (search) query.search = search;
   const limit = get('limit');
@@ -241,15 +253,13 @@ function listQuery(params: URLSearchParams): EntryQuery {
   return query;
 }
 
-/** `entry` with its warnings; with `previous`, also whether the change reset an approval. */
-function withWarnings(entry: Entry, previous: Entry | null = null): StudioEntry {
-  return {
-    ...entry,
-    warnings:
-      entry.kind === 'MESSAGE_TEMPLATE' && entry.channel !== null
-        ? messageWarnings(entry.channel, entry.value, previous?.value)
-        : [],
-  };
+/** JSON of `value` with sorted object keys, to compare schemas. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === 'object' && item !== null && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : item,
+  );
 }
 
 /** What a preview or test renders: a stored template, or an unsaved one. */
@@ -289,14 +299,17 @@ function changesOf(body: Record<string, unknown>): EntryChanges {
  * `environment`, `locale`, and `channel`:
  *
  * - `GET api/session`: the label, the user, and Laci's environments and locales
- * - `GET api/entries`: list, filtered by `kind`, `environment`, `locale`, `channel`, `status`
- *   (comma-separated), `search`, `limit`, `offset`
+ * - `GET api/entries`: list, filtered by `kind`, `key`, `environment`, `locale`, `channel`,
+ *   `status` (comma-separated), `search`, `limit`, `offset`
  * - `POST api/entries`: create (409 when it exists)
  * - `GET api/entries/:key`: one entry, in any status
  * - `PUT api/entries/:key`: change value, schema, status, or description (`expectedVersion`
  *   required)
  * - `GET api/entries/:key/history`: versions, newest first
  * - `POST api/entries/:key/rollback`: restore a version (`version`, `expectedVersion`)
+ * - `POST api/entries/:key/promote`: copy to another data environment (`from`, `to`, `kind`,
+ *   `locale`, `channel`; `all` for every locale and channel; `expectedVersion`, `sourceVersion`;
+ *   `dryRun` to only plan it)
  * - `POST api/entries/:key/sync-provider-status`: ask `syncProviderStatus` for the status of
  *   a WhatsApp template and store it
  * - `POST api/preview/email`: render a stored (`key`) or unsaved (`value`, `schema`) email with
@@ -313,6 +326,40 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
     return () => Promise.resolve(new Response('Not found.', { status: 404 }));
   }
   const { laci } = options;
+
+  /** A warning when other locales of the template `entry` have a different variable schema. */
+  async function schemaMismatch(entry: Entry): Promise<MessageWarning[]> {
+    if (entry.kind === 'CONFIG') return [];
+    const { items } = await laci.listEntries({
+      key: entry.key,
+      kind: entry.kind,
+      environment: entry.environment,
+      channel: entry.channel,
+      limit: 500,
+    });
+    const schema = canonicalJson(entry.schema);
+    const locales = items
+      .filter((other) => other.id !== entry.id && canonicalJson(other.schema) !== schema)
+      .map((other) => other.locale as string);
+    if (locales.length === 0) return [];
+    return [
+      {
+        path: 'schema',
+        message: `differs from the schema of locale ${locales.join(', ')}: every locale of a template should have the same variables`,
+        code: 'schemaMismatch',
+      },
+    ];
+  }
+
+  /** `entry` with its warnings; with `previous`, also whether the change reset an approval. */
+  async function withWarnings(entry: Entry, previous: Entry | null = null): Promise<StudioEntry> {
+    const message =
+      entry.kind === 'MESSAGE_TEMPLATE' && entry.channel !== null
+        ? messageWarnings(entry.channel, entry.value, previous?.value)
+        : [];
+    return { ...entry, warnings: [...message, ...(await schemaMismatch(entry))] };
+  }
+
   const uiDir = normalize(options.uiDir ?? fileURLToPath(new URL('../dist/ui/', import.meta.url)));
 
   async function api(request: Request, path: string, user: StudioUser | null): Promise<Response> {
@@ -378,7 +425,7 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
           ...(note ? { note } : {}),
           ...by,
         });
-        return json(201, withWarnings(entry));
+        return json(201, await withWarnings(entry));
       }
     }
 
@@ -388,7 +435,7 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
         if (method === 'GET') {
           const entry = await laci.getEntry(key, selector);
           if (!entry) throw new EntryNotFoundError({ key, ...selector });
-          return json(200, withWarnings(entry));
+          return json(200, await withWarnings(entry));
         }
         if (method === 'PUT') {
           const body = await readJson(request);
@@ -402,7 +449,7 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
             ...(note ? { note } : {}),
             ...by,
           });
-          return json(200, withWarnings(entry, previous));
+          return json(200, await withWarnings(entry, previous));
         }
       }
       if (segments.length === 3 && sub === 'history' && method === 'GET') {
@@ -429,10 +476,13 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
           ...(note ? { note } : {}),
           ...by,
         });
-        return json(200, withWarnings(entry, previous));
+        return json(200, await withWarnings(entry, previous));
+      }
+      if (segments.length === 3 && sub === 'promote' && method === 'POST') {
+        return json(200, await promote(key, await readJson(request), by));
       }
       if (segments.length === 3 && sub === 'sync-provider-status' && method === 'POST') {
-        return json(200, withWarnings(await syncProviderStatus(key, selector, by)));
+        return json(200, await withWarnings(await syncProviderStatus(key, selector, by)));
       }
     }
     throw new HttpError(404, 'Not found.');
@@ -525,6 +575,47 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
       );
     }
     return { sent: true, rendered: message.rendered };
+  }
+
+  async function promote(
+    key: string,
+    body: Record<string, unknown>,
+    by: { by?: string },
+  ): Promise<StudioPromoteResult> {
+    const from = optionalString('from', body.from);
+    const to = optionalString('to', body.to);
+    if (from === undefined || to === undefined) {
+      throw new HttpError(400, '"from" and "to" are required.');
+    }
+    if (from === to) throw new HttpError(400, '"from" and "to" must be different environments.');
+    const version = (name: string) =>
+      body[name] === undefined || body[name] === null
+        ? {}
+        : { [name]: integer(name, body[name], { min: 1 }) };
+    const versions = { ...version('expectedVersion'), ...version('sourceVersion') };
+    const all = body.all === true;
+    if (all && Object.keys(versions).length > 0) {
+      throw new HttpError(400, '"expectedVersion" and "sourceVersion" cannot be used with "all".');
+    }
+    const { kind, locale, channel } = selectorOf((name) => body[name]);
+    const note = optionalString('note', body.note);
+    const result = await laci.promote(key, {
+      from,
+      to,
+      ...(kind ? { kind } : {}),
+      ...(locale ? { locale } : {}),
+      ...(channel ? { channel } : {}),
+      all,
+      dryRun: body.dryRun === true,
+      ...versions,
+      ...(note ? { note } : {}),
+      ...by,
+    });
+    const changes = [];
+    for (const change of result.changes) {
+      changes.push({ ...change, entry: await withWarnings(change.entry, change.previous) });
+    }
+    return { changes };
   }
 
   async function syncProviderStatus(
