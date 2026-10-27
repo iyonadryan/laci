@@ -6,12 +6,20 @@ import type { EmailTemplateValue, RenderedEmail } from './email';
 import {
   describeAddress,
   EntryExistsError,
+  LaciError,
   EntryNotFoundError,
   LaciValidationError,
   UnexpectedValueError,
   UnknownEnvironmentError,
   VersionConflictError,
 } from './errors';
+import { PROVIDER_STATUSES, renderMessageTemplate, resetProviderApproval } from './message';
+import type {
+  MessageTemplateValues,
+  ProviderStatus,
+  RenderedMessages,
+  WhatsAppTemplateValue,
+} from './message';
 import { getAtPath, parsePath } from './path';
 import type { EntryQuery, LaciStore, PageQuery, Paginated } from './store/types';
 import type {
@@ -73,6 +81,11 @@ export interface LaciOptions {
   generateId?: IdGenerator;
   /** Clock. Default `() => new Date()`. */
   now?: () => Date;
+  /**
+   * Asks your WhatsApp provider (e.g. Meta) whether the template of `entry` is approved. Laci
+   * never calls a provider itself; `laci.syncProviderStatus` calls this and stores the answer.
+   */
+  syncProviderStatus?: (entry: Entry) => ProviderStatus | Promise<ProviderStatus>;
 }
 
 /** A change made through a Laci instance. */
@@ -170,6 +183,22 @@ export interface RenderOptions {
   timeZone?: string;
 }
 
+/** Options of {@link Laci.renderMessage}. */
+export interface RenderMessageOptions<
+  C extends MessageChannel = MessageChannel,
+> extends RenderOptions {
+  channel: C;
+}
+
+/** Options of {@link Laci.syncProviderStatus}. */
+export interface SyncProviderStatusOptions {
+  environment?: string;
+  /** Default: the instance's `defaultLocale`. */
+  locale?: string;
+  /** Who asked for the sync, stored in the history. */
+  by?: string;
+}
+
 /** Options of {@link Laci.history}. */
 export interface HistoryOptions extends EntrySelector, PageQuery {}
 
@@ -180,6 +209,8 @@ export interface Laci {
   readonly environments: readonly string[];
   readonly defaultLocale: string;
   readonly timeZone: string;
+  /** Whether the `syncProviderStatus` option was given. */
+  readonly canSyncProviderStatus: boolean;
 
   /**
    * Creates an entry when it does not exist yet, and returns the stored entry. An existing
@@ -238,6 +269,24 @@ export interface Laci {
    * variable schema. Only renders: sending the email is up to your app.
    */
   renderEmail(key: string, data?: object, options?: RenderOptions): Promise<RenderedEmail>;
+
+  /**
+   * Renders the published message template `key` for `options.channel` with `data`, as plain
+   * text. For WhatsApp the result has `params`: the values of the `{{ }}` of the header and
+   * body, in order, for the provider's numbered parameters. Only renders: sending is up to your
+   * app.
+   */
+  renderMessage<C extends MessageChannel>(
+    key: string,
+    data: object | undefined,
+    options: RenderMessageOptions<C>,
+  ): Promise<RenderedMessages[C]>;
+
+  /**
+   * Asks the `syncProviderStatus` option for the provider's status of the WhatsApp template
+   * `key` and stores it with the time (as a new version when it changed).
+   */
+  syncProviderStatus(key: string, options?: SyncProviderStatusOptions): Promise<Entry>;
 }
 
 const DEFAULT_ENVIRONMENTS = ['production', 'staging', 'development'] as const;
@@ -300,6 +349,17 @@ export function createLaci(options: LaciOptions): Laci {
     return entry?.kind === kind ? entry : null;
   }
 
+  /** The published template for a render, or an {@link EntryNotFoundError}. */
+  async function publishedTemplate(
+    key: string,
+    selector: EntrySelector & { kind: EntryKind },
+  ): Promise<{ entry: Entry; address: EntryAddress }> {
+    const { address } = resolve(key, selector);
+    const entry = await readPublished(selector.kind, address);
+    if (!entry) throw new EntryNotFoundError(address);
+    return { entry, address };
+  }
+
   /** The published entry, through the cache. */
   async function readPublished(kind: EntryKind, address: EntryAddress): Promise<Entry | null> {
     const cached = cache?.get(kind, address);
@@ -349,13 +409,19 @@ export function createLaci(options: LaciOptions): Laci {
       throw new VersionConflictError(current, writeOptions.expectedVersion, current.version);
     }
     const schema = changes.schema ?? current.schema;
-    const value = changes.value ?? current.value;
+    let value = changes.value ?? current.value;
     const status = changes.status ?? current.status;
     const description =
       changes.description === undefined ? current.description : changes.description;
     const issues = checkAddress({ ...current, status });
     if (issues.length > 0) throw new LaciValidationError(describeAddress(current), 'entry', issues);
-    validateContent(describeAddress(current), current.kind, schema, value, limits);
+    validateContent(describeAddress(current), current, schema, value, limits);
+    if (current.kind === 'MESSAGE_TEMPLATE' && current.channel === 'WHATSAPP') {
+      value = resetProviderApproval(
+        current.value as unknown as WhatsAppTemplateValue,
+        value as unknown as WhatsAppTemplateValue,
+      );
+    }
 
     if (
       sameJson(schema, current.schema) &&
@@ -424,6 +490,7 @@ export function createLaci(options: LaciOptions): Laci {
     environments,
     defaultLocale,
     timeZone,
+    canSyncProviderStatus: options.syncProviderStatus !== undefined,
 
     async define(key, input) {
       const { kind, address } = resolve(key, input);
@@ -437,7 +504,13 @@ export function createLaci(options: LaciOptions): Laci {
         status,
       });
       if (issues.length > 0) throw new LaciValidationError(subject, 'entry', issues);
-      validateContent(subject, kind, input.schema, input.value, limits);
+      validateContent(
+        subject,
+        { kind, channel: address.channel },
+        input.schema,
+        input.value,
+        limits,
+      );
 
       const existing = await store.getEntry(address);
       if (existing) {
@@ -580,15 +653,10 @@ export function createLaci(options: LaciOptions): Laci {
     },
 
     async renderEmail(key, data, renderOptions = {}) {
-      const { address } = resolve(key, {
+      const { entry, address } = await publishedTemplate(key, {
+        ...renderOptions,
         kind: 'EMAIL_TEMPLATE',
-        ...(renderOptions.environment === undefined
-          ? {}
-          : { environment: renderOptions.environment }),
-        ...(renderOptions.locale === undefined ? {} : { locale: renderOptions.locale }),
       });
-      const entry = await readPublished('EMAIL_TEMPLATE', address);
-      if (!entry) throw new EntryNotFoundError(address);
       return renderEmailTemplate({
         value: entry.value as unknown as EmailTemplateValue,
         schema: entry.schema,
@@ -597,6 +665,65 @@ export function createLaci(options: LaciOptions): Laci {
         timeZone: renderOptions.timeZone ?? timeZone,
         name: describeAddress(address),
       });
+    },
+
+    async renderMessage<C extends MessageChannel>(
+      key: string,
+      data: object | undefined,
+      renderOptions: RenderMessageOptions<C>,
+    ): Promise<RenderedMessages[C]> {
+      const { entry, address } = await publishedTemplate(key, {
+        ...renderOptions,
+        kind: 'MESSAGE_TEMPLATE',
+      });
+      return renderMessageTemplate({
+        channel: renderOptions.channel,
+        value: entry.value as unknown as MessageTemplateValues[C],
+        schema: entry.schema,
+        data,
+        locale: entry.locale as string,
+        timeZone: renderOptions.timeZone ?? timeZone,
+        name: describeAddress(address),
+      });
+    },
+
+    async syncProviderStatus(key, syncOptions = {}) {
+      const sync = options.syncProviderStatus;
+      if (!sync) {
+        throw new LaciError(
+          'PROVIDER_SYNC_NOT_CONFIGURED',
+          'Syncing provider statuses is not set up: pass `syncProviderStatus` to createLaci().',
+        );
+      }
+      const current = await mustLoad(key, {
+        ...syncOptions,
+        kind: 'MESSAGE_TEMPLATE',
+        channel: 'WHATSAPP',
+      });
+      const status: unknown = await sync(current);
+      if (!(PROVIDER_STATUSES as readonly unknown[]).includes(status)) {
+        throw new UnexpectedValueError(
+          `syncProviderStatus must return ${PROVIDER_STATUSES.join(', ')}, but returned ${JSON.stringify(status)} for ${describeAddress(current)}.`,
+        );
+      }
+      const value = current.value as unknown as WhatsAppTemplateValue;
+      if (value.providerStatus === status) return current;
+      return writeVersion(
+        current,
+        {
+          value: {
+            ...value,
+            providerStatus: status as ProviderStatus,
+            providerSyncedAt: now().toISOString(),
+          },
+        },
+        {
+          ...(syncOptions.by === undefined ? {} : { by: syncOptions.by }),
+          expectedVersion: current.version,
+        },
+        'update',
+        `Provider status: ${status as string}`,
+      );
     },
   };
   return laci;

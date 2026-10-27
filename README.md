@@ -39,13 +39,13 @@ them through a small, typed API.
 
 ## Packages
 
-| Package            | Description                                                     |
-| ------------------ | --------------------------------------------------------------- |
-| `@lacijs/core`     | Store API, validation, in-memory store, email templates         |
-| `@lacijs/postgres` | PostgreSQL storage adapter                                      |
-| `@lacijs/mysql`    | MySQL storage adapter                                           |
-| `@lacijs/editor`   | React editor components (planned)                               |
-| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned) |
+| Package            | Description                                                         |
+| ------------------ | ------------------------------------------------------------------- |
+| `@lacijs/core`     | Store API, validation, in-memory store, email and message templates |
+| `@lacijs/postgres` | PostgreSQL storage adapter                                          |
+| `@lacijs/mysql`    | MySQL storage adapter                                               |
+| `@lacijs/editor`   | React editor components (planned)                                   |
+| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned)     |
 
 ## Quick look (planned API)
 
@@ -87,13 +87,37 @@ if (process.env.NODE_ENV !== 'production') {
 }
 ```
 
+## WhatsApp templates and provider parameters
+
+WhatsApp providers such as the Meta Cloud API only send templates they have approved. Those templates use numbered parameters (`{{1}}`, `{{2}}`). Laci templates use variable names. Laci maps one to the other like this:
+
+- Each `{{ ... }}` in the header or body is one parameter. They are numbered in the order they appear, starting at `{{1}}` in the header and again at `{{1}}` in the body, as the provider expects. A variable used twice becomes two parameters.
+- Filters are applied first, so `{{ startAt | formatDate: "long" }}` sends the formatted date.
+- The header and body may only contain text and `{{ }}`. Tags such as `{% if %}` are refused because the provider's template is fixed text. Footers and button texts allow no variables. A URL button may have one variable, at the end of its URL.
+
+```ts
+// body: 'Hi {{ name }}, your live stream starts {{ startAt | formatDate: "datetime" }}.'
+whatsAppProviderTemplate(value).body;
+// -> 'Hi {{1}}, your live stream starts {{2}}.'   (register this text with the provider)
+
+const wa = await laci.renderMessage('customer-live-reminder', data, { channel: 'WHATSAPP' });
+// wa.providerTemplateName -> 'customer_live_reminder'
+// wa.headerParams, wa.bodyParams -> the values for {{1}}, {{2}}, ... of each part
+// wa.params -> headerParams followed by bodyParams
+// wa.body -> the full text, for previews and logs
+```
+
+The template's `providerStatus` (`PENDING`, `APPROVED`, or `REJECTED`) is stored in its value. Laci never calls a provider itself. You can pass a `syncProviderStatus(entry)` option to `createLaci` that asks your provider for the status. `laci.syncProviderStatus(key)` then stores the answer and the time it was synced. When the reviewed content of an `APPROVED` template changes, Laci sets it back to `PENDING`, because the provider has to approve it again. The reviewed content is the name, category, header, body, footer, and buttons.
+
+SMS templates come with `countSmsSegments(text)`. GSM-7 text fits 160 characters in one SMS, or 153 per part when it is split. Any other character, such as an emoji, switches the text to UCS-2: 70 characters, or 67 per part. Push templates warn when the title is over about 40 characters or the body over about 178, since phones cut them off there.
+
 ## Roadmap
 
 - [x] Foundation: monorepo, entry schema, validator
 - [x] Core: get/set, path access, history, rollback, optimistic locking, cache
 - [x] PostgreSQL and MySQL adapters
 - [x] Email templates
-- [ ] Message templates (WhatsApp, SMS, push, in-app)
+- [x] Message templates (WhatsApp, SMS, push, in-app)
 - [ ] Environments and promote, locales and fallback
 - [ ] Visual editor and Laci Studio
 - [ ] Docs and first release (`0.1.0`)

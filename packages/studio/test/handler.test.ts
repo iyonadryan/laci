@@ -133,6 +133,7 @@ describe('API', () => {
       channels: ['WHATSAPP', 'SMS', 'PUSH', 'IN_APP'],
       timeZone: 'UTC',
       sendTest: false,
+      providerSync: false,
     });
     vi.stubEnv('NODE_ENV', undefined);
     const plain = await setupHandler();

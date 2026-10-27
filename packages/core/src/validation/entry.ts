@@ -1,8 +1,10 @@
-import { checkEmailTemplate, checkVariableSchema } from '../email';
+import { checkEmailTemplate } from '../email';
 import { LaciValidationError } from '../errors';
 import type { ValidationIssue } from '../errors';
+import { checkMessageTemplate } from '../message';
+import { checkVariableSchema } from '../template/common';
 import { ENTRY_STATUSES, MESSAGE_CHANNELS } from '../types';
-import type { EntryKind, JsonSchema, JsonValue } from '../types';
+import type { EntryKind, JsonSchema, JsonValue, MessageChannel } from '../types';
 import { checkValue } from './limits';
 import type { ValueLimits } from './limits';
 import { checkSchema, validateAgainstSchema } from './schema';
@@ -59,14 +61,16 @@ export function checkAddress(input: {
  * Validates what an entry stores. Throws a {@link LaciValidationError} for an unusable schema,
  * a value that is not plain JSON or exceeds the limits, a config value that does not match its
  * schema, or a template value with the wrong fields, template errors, or undeclared variables.
+ * `channel` must already be checked (see {@link checkAddress}).
  */
 export function validateContent(
   subject: string,
-  kind: EntryKind,
+  address: { kind: EntryKind; channel: MessageChannel | null },
   schema: unknown,
   value: unknown,
   limits: Required<ValueLimits>,
 ): asserts value is JsonValue {
+  const { kind } = address;
   const schemaIssues = checkSchema(schema);
   if (schemaIssues.length > 0) throw new LaciValidationError(subject, 'schema', schemaIssues);
   const valueIssues = checkValue(value, limits);
@@ -80,6 +84,6 @@ export function validateContent(
       ? validateAgainstSchema(schema as JsonSchema, value)
       : kind === 'EMAIL_TEMPLATE'
         ? checkEmailTemplate(value, schema as JsonSchema)
-        : [];
+        : checkMessageTemplate(address.channel as MessageChannel, value, schema as JsonSchema);
   if (issues.length > 0) throw new LaciValidationError(subject, 'value', issues);
 }

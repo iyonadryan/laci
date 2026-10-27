@@ -3,20 +3,26 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   checkEmailTemplate,
+  checkMessageTemplate,
   checkVariableSchema,
   ENTRY_KINDS,
   ENTRY_STATUSES,
   EntryExistsError,
   EntryNotFoundError,
+  LaciError,
   LaciValidationError,
   MESSAGE_CHANNELS,
+  messageWarnings,
   renderEmailTemplate,
+  renderMessageTemplate,
   TemplateRenderError,
+  UnexpectedValueError,
   UnknownEnvironmentError,
   VersionConflictError,
 } from '@lacijs/core';
 import type {
   EmailTemplateValue,
+  Entry,
   EntryChanges,
   EntryKind,
   EntryQuery,
@@ -26,7 +32,10 @@ import type {
   JsonValue,
   Laci,
   MessageChannel,
+  MessageTemplateValue,
+  MessageWarning,
   RenderedEmail,
+  RenderedMessage,
 } from '@lacijs/core';
 import { CSRF_HEADER } from './shared';
 import type { StudioUser } from './shared';
@@ -63,8 +72,25 @@ export interface SendTestEmail {
   to: string;
 }
 
+/** A rendered message template (WhatsApp, SMS, push, in-app) for {@link StudioOptions.sendTest}. */
+export interface SendTestMessageTemplate {
+  kind: 'MESSAGE_TEMPLATE';
+  channel: MessageChannel;
+  /** The template's key, or `null` for a template that has not been saved. */
+  key: string | null;
+  rendered: RenderedMessage;
+  /** Where to send it, as typed in the studio: a phone number, a device, a user ID... */
+  to: string;
+}
+
 /** What {@link StudioOptions.sendTest} is asked to send. */
-export type SendTestMessage = SendTestEmail;
+export type SendTestMessage = SendTestEmail | SendTestMessageTemplate;
+
+/** An entry as the studio API returns it. */
+export type StudioEntry = Entry & {
+  /** Message templates: see `messageWarnings` of `@lacijs/core`. Empty for other kinds. */
+  warnings: MessageWarning[];
+};
 
 /** Sends a test message; throw to report a failure to the studio user. */
 export type SendTest = (message: SendTestMessage) => void | Promise<void>;
@@ -215,6 +241,28 @@ function listQuery(params: URLSearchParams): EntryQuery {
   return query;
 }
 
+/** `entry` with its warnings; with `previous`, also whether the change reset an approval. */
+function withWarnings(entry: Entry, previous: Entry | null = null): StudioEntry {
+  return {
+    ...entry,
+    warnings:
+      entry.kind === 'MESSAGE_TEMPLATE' && entry.channel !== null
+        ? messageWarnings(entry.channel, entry.value, previous?.value)
+        : [],
+  };
+}
+
+/** What a preview or test renders: a stored template, or an unsaved one. */
+interface TemplateSource {
+  /** Names the template in error messages. */
+  name: string;
+  value: unknown;
+  schema: JsonSchema;
+  locale: string;
+  timeZone: string;
+  data: unknown;
+}
+
 function changesOf(body: Record<string, unknown>): EntryChanges {
   const changes: EntryChanges = {};
   if ('value' in body) changes.value = body.value as JsonValue;
@@ -249,9 +297,15 @@ function changesOf(body: Record<string, unknown>): EntryChanges {
  *   required)
  * - `GET api/entries/:key/history`: versions, newest first
  * - `POST api/entries/:key/rollback`: restore a version (`version`, `expectedVersion`)
+ * - `POST api/entries/:key/sync-provider-status`: ask `syncProviderStatus` for the status of
+ *   a WhatsApp template and store it
  * - `POST api/preview/email`: render a stored (`key`) or unsaved (`value`, `schema`) email with
  *   `data`; drafts too
- * - `POST api/send-test`: render like a preview and pass it to `sendTest` with `to`
+ * - `POST api/preview/message`: the same for a message template of `channel`
+ * - `POST api/send-test`: render like a preview (`kind` picks email or message) and pass it to
+ *   `sendTest` with `to`
+ *
+ * Responses with one entry add its `warnings` (see `messageWarnings`).
  */
 export function createStudioHandler(options: StudioOptions & { uiDir?: string }): StudioHandler {
   if (!isStudioEnabled(options)) {
@@ -285,10 +339,14 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
         channels: MESSAGE_CHANNELS,
         timeZone: laci.timeZone,
         sendTest: options.sendTest !== undefined,
+        providerSync: laci.canSyncProviderStatus,
       });
     }
     if (method === 'POST' && segments.length === 2 && resource === 'preview' && key === 'email') {
       return json(200, await renderEmail(await readJson(request)));
+    }
+    if (method === 'POST' && segments.length === 2 && resource === 'preview' && key === 'message') {
+      return json(200, await renderMessage(await readJson(request)));
     }
     if (method === 'POST' && segments.length === 1 && resource === 'send-test') {
       return json(200, await sendTest(await readJson(request)));
@@ -320,7 +378,7 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
           ...(note ? { note } : {}),
           ...by,
         });
-        return json(201, entry);
+        return json(201, withWarnings(entry));
       }
     }
 
@@ -330,19 +388,21 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
         if (method === 'GET') {
           const entry = await laci.getEntry(key, selector);
           if (!entry) throw new EntryNotFoundError({ key, ...selector });
-          return json(200, entry);
+          return json(200, withWarnings(entry));
         }
         if (method === 'PUT') {
           const body = await readJson(request);
           const expectedVersion = integer('expectedVersion', body.expectedVersion, { min: 1 });
           const note = optionalString('note', body.note);
-          const entry = await laci.update(key, changesOf(body), {
+          const changes = changesOf(body);
+          const previous = await laci.getEntry(key, selector);
+          const entry = await laci.update(key, changes, {
             ...selector,
             expectedVersion,
             ...(note ? { note } : {}),
             ...by,
           });
-          return json(200, entry);
+          return json(200, withWarnings(entry, previous));
         }
       }
       if (segments.length === 3 && sub === 'history' && method === 'GET') {
@@ -362,88 +422,136 @@ export function createStudioHandler(options: StudioOptions & { uiDir?: string })
         const version = integer('version', body.version, { min: 1 });
         const expectedVersion = integer('expectedVersion', body.expectedVersion, { min: 1 });
         const note = optionalString('note', body.note);
+        const previous = await laci.getEntry(key, selector);
         const entry = await laci.rollback(key, version, {
           ...selector,
           expectedVersion,
           ...(note ? { note } : {}),
           ...by,
         });
-        return json(200, entry);
+        return json(200, withWarnings(entry, previous));
+      }
+      if (segments.length === 3 && sub === 'sync-provider-status' && method === 'POST') {
+        return json(200, withWarnings(await syncProviderStatus(key, selector, by)));
       }
     }
     throw new HttpError(404, 'Not found.');
   }
 
   /**
-   * Renders an email from the request: the unsaved `value` and `schema` when given (checked
+   * The template a preview or test renders: the unsaved `value` and `schema` when given (checked
    * first), otherwise the stored template `key` in any status.
    */
-  async function renderEmail(body: Record<string, unknown>): Promise<RenderedEmail> {
+  async function templateSource(
+    body: Record<string, unknown>,
+    kind: 'EMAIL_TEMPLATE' | 'MESSAGE_TEMPLATE',
+    channel: MessageChannel | null,
+  ): Promise<TemplateSource> {
     const key = optionalString('key', body.key) ?? null;
-    const name = key === null ? 'email template' : `"${key}"`;
+    const name =
+      key !== null ? `"${key}"` : kind === 'EMAIL_TEMPLATE' ? 'email template' : 'message template';
     const timeZone = optionalString('timeZone', body.timeZone) ?? laci.timeZone;
     try {
       new Intl.DateTimeFormat('en-US', { timeZone });
     } catch {
       throw new HttpError(400, `"timeZone" must be an IANA time zone such as "Asia/Jakarta".`);
     }
-    let value: unknown;
-    let schema: JsonSchema;
-    let locale = optionalString('locale', body.locale);
+    const data = body.data ?? {};
     if (body.value !== undefined) {
       if (!isObject(body.schema))
         throw new HttpError(400, '"schema" must be a JSON Schema object.');
-      schema = body.schema as JsonSchema;
+      const schema = body.schema as JsonSchema;
       const schemaIssues = checkVariableSchema(schema);
       if (schemaIssues.length > 0) throw new LaciValidationError(name, 'schema', schemaIssues);
-      const issues = checkEmailTemplate(body.value, schema);
+      const issues =
+        channel === null
+          ? checkEmailTemplate(body.value, schema)
+          : checkMessageTemplate(channel, body.value, schema);
       if (issues.length > 0) throw new LaciValidationError(name, 'value', issues);
-      value = body.value;
-    } else {
-      if (key === null) throw new HttpError(400, 'Pass "key" or "value" and "schema".');
-      const selector = selectorOf((field) => body[field]);
-      const entry = await laci.getEntry(key, { ...selector, kind: 'EMAIL_TEMPLATE' });
-      if (!entry) throw new EntryNotFoundError({ key, ...selector });
-      ({ value, schema } = entry);
-      locale = entry.locale as string;
+      const locale = optionalString('locale', body.locale) ?? laci.defaultLocale;
+      return { name, value: body.value, schema, locale, timeZone, data };
     }
-    return renderEmailTemplate({
-      value: value as EmailTemplateValue,
-      schema,
-      data: body.data ?? {},
-      locale: locale ?? laci.defaultLocale,
-      timeZone,
-      name,
+    if (key === null) throw new HttpError(400, 'Pass "key" or "value" and "schema".');
+    const selector = { ...selectorOf((field) => body[field]), kind };
+    const entry = await laci.getEntry(key, selector);
+    if (!entry) throw new EntryNotFoundError({ key, ...selector });
+    const { value, schema } = entry;
+    return { name, value, schema, locale: entry.locale as string, timeZone, data };
+  }
+
+  async function renderEmail(body: Record<string, unknown>): Promise<RenderedEmail> {
+    const source = await templateSource(body, 'EMAIL_TEMPLATE', null);
+    return renderEmailTemplate({ ...source, value: source.value as EmailTemplateValue });
+  }
+
+  /** The `channel` of a message request; it is required. */
+  function channelOf(body: Record<string, unknown>): MessageChannel {
+    const channel = oneOf<MessageChannel>('channel', body.channel, MESSAGE_CHANNELS);
+    if (channel === undefined) throw new HttpError(400, '"channel" is required.');
+    return channel;
+  }
+
+  async function renderMessage(body: Record<string, unknown>): Promise<RenderedMessage> {
+    const channel = channelOf(body);
+    const source = await templateSource(body, 'MESSAGE_TEMPLATE', channel);
+    return renderMessageTemplate({
+      ...source,
+      channel,
+      value: source.value as MessageTemplateValue,
     });
   }
 
   async function sendTest(
     body: Record<string, unknown>,
-  ): Promise<{ sent: true; rendered: RenderedEmail }> {
+  ): Promise<{ sent: true; rendered: RenderedEmail | RenderedMessage }> {
     if (!options.sendTest) {
       throw new HttpError(404, 'Sending tests is not set up: pass `sendTest` to the studio.');
     }
     const kind = oneOf<EntryKind>('kind', body.kind, ENTRY_KINDS) ?? 'EMAIL_TEMPLATE';
-    if (kind !== 'EMAIL_TEMPLATE')
-      throw new HttpError(400, 'Only email templates can be sent as a test.');
+    if (kind === 'CONFIG') throw new HttpError(400, 'Only templates can be sent as a test.');
     const to = optionalString('to', body.to);
     if (to === undefined) throw new HttpError(400, '"to" is required.');
-    const rendered = await renderEmail(body);
+    const key = optionalString('key', body.key) ?? null;
+    const message: SendTestMessage =
+      kind === 'EMAIL_TEMPLATE'
+        ? { kind, channel: null, key, rendered: await renderEmail(body), to }
+        : { kind, channel: channelOf(body), key, rendered: await renderMessage(body), to };
     try {
-      await options.sendTest({
-        kind,
-        channel: null,
-        key: optionalString('key', body.key) ?? null,
-        rendered,
-        to,
-      });
+      await options.sendTest(message);
     } catch (error) {
       throw new HttpError(
         502,
         `Sending the test failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return { sent: true, rendered };
+    return { sent: true, rendered: message.rendered };
+  }
+
+  async function syncProviderStatus(
+    key: string,
+    selector: EntrySelector,
+    by: { by?: string },
+  ): Promise<Entry> {
+    if (!laci.canSyncProviderStatus) {
+      throw new HttpError(
+        404,
+        'Syncing provider statuses is not set up: pass `syncProviderStatus` to createLaci().',
+      );
+    }
+    try {
+      return await laci.syncProviderStatus(key, {
+        ...(selector.environment ? { environment: selector.environment } : {}),
+        ...(selector.locale ? { locale: selector.locale } : {}),
+        ...by,
+      });
+    } catch (error) {
+      // Laci's own errors keep their status; anything else comes from the provider call.
+      if (error instanceof LaciError && !(error instanceof UnexpectedValueError)) throw error;
+      throw new HttpError(
+        502,
+        `Syncing the provider status failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async function asset(path: string): Promise<Response> {

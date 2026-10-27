@@ -1,4 +1,4 @@
-import type { JsonSchema, JsonValue } from '../src';
+import type { JsonSchema, JsonValue, WhatsAppTemplateValue } from '../src';
 
 /** Customers that are live, each with sessions, each with time slots: lists three levels deep. */
 export const customerLiveStream = {
@@ -141,4 +141,32 @@ export const approvalRequest = {
       '{{ requester.name }} asks for {{ amount | formatNumber: "currency", "IDR" }} by {{ dueDate | formatDate: "long" }}.\n' +
       '{% for item in items %}- {{ item }}\n{% endfor %}Review: {{ link }}',
   },
+};
+
+/** A WhatsApp reminder that a customer's live stream starts soon, approved by the provider. */
+export const liveReminder = {
+  kind: 'MESSAGE_TEMPLATE' as const,
+  channel: 'WHATSAPP' as const,
+  schema: {
+    type: 'object',
+    required: ['name', 'startAt', 'code'],
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      startAt: { type: 'string', format: 'date-time' },
+      code: { type: 'string' },
+      host: { type: 'string' },
+    },
+  } satisfies JsonSchema,
+  value: {
+    providerTemplateName: 'customer_live_reminder',
+    category: 'UTILITY',
+    header: 'Live soon, {{ name }}',
+    body: 'Hi {{ name }}, your live stream starts {{ startAt | formatDate: "datetime" }}. Code: {{ code | upcase }}.',
+    footer: 'Reply STOP to opt out',
+    buttons: [
+      { type: 'URL', text: 'Open', url: 'https://example.com/live/{{ code }}' },
+      { type: 'QUICK_REPLY', text: 'Remind me later' },
+    ],
+    providerStatus: 'APPROVED',
+  } as WhatsAppTemplateValue,
 };

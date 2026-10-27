@@ -3,6 +3,8 @@ export type {
   SendTest,
   SendTestEmail,
   SendTestMessage,
+  SendTestMessageTemplate,
+  StudioEntry,
   StudioHandler,
   StudioOptions,
   StudioRequestContext,

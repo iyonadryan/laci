@@ -161,7 +161,7 @@ describe('POST api/send-test', () => {
       [
         { kind: 'CONFIG', key: 'linkPath', to: 'a@b.c' },
         400,
-        'Only email templates can be sent as a test.',
+        'Only templates can be sent as a test.',
       ],
       [
         { key: 'approval-request', data: { name: 'x' }, to: 'a@b.c' },

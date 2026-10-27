@@ -1,4 +1,5 @@
-import { Liquid } from 'liquidjs';
+import { Liquid, Output, TokenKind } from 'liquidjs';
+import type { Template } from 'liquidjs';
 
 /** `html` escapes every `{{ output }}` (use `| raw` to opt out); `text` outputs as is. */
 export type TemplateMode = 'html' | 'text';
@@ -164,4 +165,49 @@ export function renderTemplate(
   context: FormatContext,
 ): Promise<string> {
   return engine(mode, context).parseAndRender(source, data) as Promise<string>;
+}
+
+/** One top-level piece of a template: fixed text, a `{{ output }}`, or a `{% tag %}`. */
+export interface TemplatePiece {
+  kind: 'text' | 'output' | 'tag';
+  /** The piece as written, e.g. `{{ name | upcase }}`. */
+  source: string;
+  /** What a text piece outputs (whitespace control applied); `null` for the others. */
+  text: string | null;
+}
+
+function pieceOf(template: Template, liquid: Liquid): TemplatePiece {
+  const source = template.token.getText();
+  if (template instanceof Output) return { kind: 'output', source, text: null };
+  if (template.token.kind === TokenKind.HTML) {
+    return { kind: 'text', source, text: liquid.renderSync([template]) as string };
+  }
+  return { kind: 'tag', source, text: null };
+}
+
+/** Splits `source` (text mode) into its top-level pieces. Throws the parse error. */
+export function splitTemplate(source: string): TemplatePiece[] {
+  const liquid = engine('text', PARSE_CONTEXT);
+  return liquid.parse(source).map((template) => pieceOf(template, liquid));
+}
+
+/**
+ * Renders every top-level piece of `source` (text mode) on its own, e.g. to get the value of
+ * each `{{ output }}`. Throws LiquidJS's error when a piece fails.
+ */
+export async function renderPieces(
+  source: string,
+  data: Record<string, unknown>,
+  context: FormatContext,
+): Promise<(TemplatePiece & { rendered: string })[]> {
+  const liquid = engine('text', context);
+  const templates = liquid.parse(source);
+  const rendered: (TemplatePiece & { rendered: string })[] = [];
+  for (const template of templates) {
+    rendered.push({
+      ...pieceOf(template, liquid),
+      rendered: (await liquid.render([template], data)) as string,
+    });
+  }
+  return rendered;
 }
