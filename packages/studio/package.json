@@ -1,0 +1,118 @@
+{
+  "name": "@lacijs/studio",
+  "version": "0.0.0",
+  "description": "Laci Studio: the Laci editor as a ready-made web app, on its own port or mounted in Express, Fastify, or Hono.",
+  "license": "MIT",
+  "author": "Iyon",
+  "homepage": "https://github.com/iyonadryan/laci/tree/main/packages/studio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iyonadryan/laci.git",
+    "directory": "packages/studio"
+  },
+  "bugs": {
+    "url": "https://github.com/iyonadryan/laci/issues"
+  },
+  "keywords": [
+    "config",
+    "runtime-config",
+    "laci",
+    "studio",
+    "express",
+    "fastify",
+    "hono"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./express": {
+      "import": {
+        "types": "./dist/express.d.ts",
+        "default": "./dist/express.js"
+      },
+      "require": {
+        "types": "./dist/express.d.cts",
+        "default": "./dist/express.cjs"
+      }
+    },
+    "./fastify": {
+      "import": {
+        "types": "./dist/fastify.d.ts",
+        "default": "./dist/fastify.js"
+      },
+      "require": {
+        "types": "./dist/fastify.d.cts",
+        "default": "./dist/fastify.cjs"
+      }
+    },
+    "./hono": {
+      "import": {
+        "types": "./dist/hono.d.ts",
+        "default": "./dist/hono.js"
+      },
+      "require": {
+        "types": "./dist/hono.d.cts",
+        "default": "./dist/hono.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "peerDependencies": {
+    "@lacijs/core": "workspace:^",
+    "express": ">=4.18",
+    "fastify": ">=5.0",
+    "hono": ">=4.8"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@lacijs/core": "workspace:*",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "express": "^5.3.0",
+    "fastify": "^5.12.7",
+    "hono": "^4.13.13",
+    "tsup": "^9.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

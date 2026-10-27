@@ -45,7 +45,7 @@ them through a small, typed API.
 | `@lacijs/postgres` | PostgreSQL storage adapter                                           |
 | `@lacijs/mysql`    | MySQL storage adapter                                                |
 | `@lacijs/editor`   | React editor components (planned)                                    |
-| `@lacijs/studio`   | The editor as a ready-made web app (planned)                         |
+| `@lacijs/studio`   | The editor as a ready-made web app (server and API; UI planned)      |
 
 ## Quick look (planned API)
 
