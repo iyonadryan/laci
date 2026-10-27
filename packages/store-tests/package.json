@@ -1,0 +1,23 @@
+{
+  "name": "@lacijs/store-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared test suite every Laci storage adapter must pass.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run"
+  },
+  "peerDependencies": {
+    "@lacijs/core": "workspace:*",
+    "vitest": "*"
+  },
+  "devDependencies": {
+    "@lacijs/core": "workspace:*",
+    "vitest": "^5.0.5"
+  }
+}

@@ -15,13 +15,13 @@ them through a small, typed API.
 
 ## Requirements
 
-| What                                  | Version                                                      |
-| ------------------------------------- | ------------------------------------------------------------ |
-| Node.js                               | **24 or newer**                                              |
-| PostgreSQL (with `@lacijs/postgres`)  | 12 or newer, driver `pg` 8.11+                               |
-| MySQL (with `@lacijs/mysql`)          | 8.0.19 or newer, InnoDB, driver `mysql2` 3.9+                |
-| React (with `@lacijs/editor`)         | 18 or newer                                                  |
-| Express, Fastify, or Hono (Laci Studio) | Only to mount the studio in your app                       |
+| What                                    | Version                                       |
+| --------------------------------------- | --------------------------------------------- |
+| Node.js                                 | **24 or newer**                               |
+| PostgreSQL (with `@lacijs/postgres`)    | 12 or newer, driver `pg` 8.11+                |
+| MySQL (with `@lacijs/mysql`)            | 8.0.19 or newer, InnoDB, driver `mysql2` 3.9+ |
+| React (with `@lacijs/editor`)           | 18 or newer                                   |
+| Express, Fastify, or Hono (Laci Studio) | Only to mount the studio in your app          |
 
 ## Features
 
@@ -37,15 +37,15 @@ them through a small, typed API.
 - **Laci Studio.** The editor as a ready-made app next to yours. Off in production by default.
 - **Database-agnostic core.** Adapters for PostgreSQL and MySQL, or write your own.
 
-## Packages (planned)
+## Packages
 
-| Package            | Description                                  |
-| ------------------ | -------------------------------------------- |
-| `@lacijs/core`     | Store API, validation, template rendering    |
-| `@lacijs/postgres` | PostgreSQL storage adapter                   |
-| `@lacijs/mysql`    | MySQL storage adapter                        |
-| `@lacijs/editor`   | React editor components                      |
-| `@lacijs/studio`   | The editor as a ready-made web app           |
+| Package            | Description                                                          |
+| ------------------ | -------------------------------------------------------------------- |
+| `@lacijs/core`     | Store API, validation, in-memory store, template rendering (planned) |
+| `@lacijs/postgres` | PostgreSQL storage adapter                                           |
+| `@lacijs/mysql`    | MySQL storage adapter                                                |
+| `@lacijs/editor`   | React editor components (planned)                                    |
+| `@lacijs/studio`   | The editor as a ready-made web app (planned)                         |
 
 ## Quick look (planned API)
 
@@ -89,9 +89,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 ## Roadmap
 
-- [ ] Foundation: monorepo, entry schema, validator
-- [ ] Core: get/set, path access, history, rollback, optimistic locking, cache
-- [ ] PostgreSQL and MySQL adapters
+- [x] Foundation: monorepo, entry schema, validator
+- [x] Core: get/set, path access, history, rollback, optimistic locking, cache
+- [x] PostgreSQL and MySQL adapters
 - [ ] Email templates
 - [ ] Message templates (WhatsApp, SMS, push, in-app)
 - [ ] Environments and promote, locales and fallback

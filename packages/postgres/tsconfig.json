@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "paths": {
+      "@lacijs/core": ["../core/src/index.ts"],
+      "@lacijs/store-tests": ["../store-tests/src/index.ts"]
+    }
+  },
+  "include": ["src", "test", "scripts", "*.ts"]
+}

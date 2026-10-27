@@ -1,0 +1,74 @@
+{
+  "name": "@lacijs/postgres",
+  "version": "0.0.0",
+  "description": "PostgreSQL storage adapter for Laci, using your own pg pool.",
+  "license": "MIT",
+  "author": "Iyon",
+  "homepage": "https://github.com/iyonadryan/laci/tree/main/packages/postgres#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iyonadryan/laci.git",
+    "directory": "packages/postgres"
+  },
+  "bugs": {
+    "url": "https://github.com/iyonadryan/laci/issues"
+  },
+  "keywords": [
+    "config",
+    "runtime-config",
+    "laci",
+    "postgres",
+    "postgresql"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./schema.postgres.sql": "./schema.postgres.sql",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "schema.postgres.sql",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "schema": "node scripts/write-schema.ts"
+  },
+  "peerDependencies": {
+    "@lacijs/core": "workspace:^",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@lacijs/core": "workspace:*",
+    "@lacijs/store-tests": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.5",
+    "pg": "^8.23.1",
+    "tsup": "^9.0.0",
+    "vitest": "^5.0.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
